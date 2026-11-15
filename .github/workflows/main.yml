@@ -1,3 +1,4 @@
+
 name: Build unsigned QUIZLOCK IPA
 
 on:
@@ -14,18 +15,25 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Locate project.yml and build unsigned IPA
+      - name: Generate Xcode project and build unsigned IPA
+        shell: bash
         run: |
-          SPEC_FILE=$(find . -name "project.yml" -print -quit)
+          set -euo pipefail
+
+          SPEC_FILE=$(find . -name "project.yml" -not -path "*/.git/*" -print -quit)
+
           if [ -z "$SPEC_FILE" ]; then
-            echo "Error: Could not find project.yml anywhere in the repository!"
+            echo "Error: project.yml not found!"
             exit 1
           fi
+
           PROJECT_DIR=$(dirname "$SPEC_FILE")
-          echo "Found project.yml in $PROJECT_DIR"
           cd "$PROJECT_DIR"
 
+          echo "Generating Xcode project..."
           xcodegen generate
+
+          echo "Building unsigned iOS app..."
 
           xcodebuild \
             -project QUIZLOCK.xcodeproj \
@@ -36,15 +44,31 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            ENABLE_BITCODE=NO \
             build
 
+          APP_PATH="build/Build/Products/Release-iphoneos/QUIZLOCK.app"
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Error: QUIZLOCK.app was not generated!"
+            exit 1
+          fi
+
+          echo "Packaging IPA..."
+
           mkdir -p dist/Payload
-          cp -R build/Build/Products/Release-iphoneos/QUIZLOCK.app dist/Payload/
+          cp -R "$APP_PATH" dist/Payload/
+
           cd dist
           zip -r QUIZLOCK-unsigned.ipa Payload
+
+          echo "Unsigned IPA created successfully!"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: QUIZLOCK-unsigned-IPA
           path: "**/dist/QUIZLOCK-unsigned.ipa"
+          if-no-files-found: error
+          retention-days: 7
