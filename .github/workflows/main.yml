@@ -14,11 +14,19 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Generate Xcode project
-        run: xcodegen generate
-
-      - name: Build unsigned app
+      - name: Locate project.yml and build unsigned IPA
         run: |
+          SPEC_FILE=$(find . -name "project.yml" -print -quit)
+          if [ -z "$SPEC_FILE" ]; then
+            echo "Error: Could not find project.yml anywhere in the repository!"
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$SPEC_FILE")
+          echo "Found project.yml in $PROJECT_DIR"
+          cd "$PROJECT_DIR"
+
+          xcodegen generate
+
           xcodebuild \
             -project QUIZLOCK.xcodeproj \
             -scheme QUIZLOCK \
@@ -30,8 +38,6 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Package unsigned IPA
-        run: |
           mkdir -p dist/Payload
           cp -R build/Build/Products/Release-iphoneos/QUIZLOCK.app dist/Payload/
           cd dist
@@ -41,4 +47,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: QUIZLOCK-unsigned-IPA
-          path: dist/QUIZLOCK-unsigned.ipa
+          path: "**/dist/QUIZLOCK-unsigned.ipa"
