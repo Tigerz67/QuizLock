@@ -9,33 +9,53 @@ jobs:
     runs-on: macos-latest
 
     steps:
+      # 1. Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Install XcodeGen
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Generate Xcode project and build unsigned IPA
+      # 3. Find project.yml and generate Xcode project
+      - name: Generate Xcode project
         shell: bash
         run: |
           set -euo pipefail
 
-          SPEC_FILE=$(find . -name "project.yml" -not -path "*/.git/*" -print -quit)
+          SPEC_FILE=$(find . -name "project.yml" \
+            -not -path "*/.git/*" -print -quit)
 
           if [ -z "$SPEC_FILE" ]; then
-            echo "Error: project.yml not found!"
+            echo "ERROR: Could not find project.yml!"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SPEC_FILE")
+
+          echo "Found project: $PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
           cd "$PROJECT_DIR"
 
-          echo "Generating Xcode project..."
           xcodegen generate
 
-          echo "Building unsigned iOS app..."
+      # 4. Build unsigned iOS application
+      - name: Build unsigned QUIZLOCK app
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          echo "Cleaning previous build..."
+          rm -rf build dist
+
+          echo "Starting unsigned iOS build..."
 
           xcodebuild \
+            -skipMacroValidation \
             -project QUIZLOCK.xcodeproj \
             -scheme QUIZLOCK \
             -configuration Release \
@@ -46,29 +66,50 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_ENTITLEMENTS="" \
             ENABLE_BITCODE=NO \
-            build
+            build | tee build.log
+
+          echo "Build completed!"
+
+      # 5. Package IPA
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
 
           APP_PATH="build/Build/Products/Release-iphoneos/QUIZLOCK.app"
 
           if [ ! -d "$APP_PATH" ]; then
-            echo "Error: QUIZLOCK.app was not generated!"
+            echo "ERROR: QUIZLOCK.app not found!"
+            echo "Expected: $APP_PATH"
             exit 1
           fi
 
-          echo "Packaging IPA..."
-
           mkdir -p dist/Payload
+
           cp -R "$APP_PATH" dist/Payload/
 
           cd dist
-          zip -r QUIZLOCK-unsigned.ipa Payload
 
-          echo "Unsigned IPA created successfully!"
+          zip -qry QUIZLOCK-unsigned.ipa Payload
 
+          if [ ! -f "QUIZLOCK-unsigned.ipa" ]; then
+            echo "ERROR: IPA packaging failed!"
+            exit 1
+          fi
+
+          echo "================================"
+          echo "UNSIGNED IPA CREATED SUCCESSFULLY"
+          echo "================================"
+
+          ls -lh QUIZLOCK-unsigned.ipa
+
+      # 6. Upload IPA
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: QUIZLOCK-unsigned-IPA
-          path: "**/dist/QUIZLOCK-unsigned.ipa"
+          path: ${{ env.PROJECT_DIR }}/dist/QUIZLOCK-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
